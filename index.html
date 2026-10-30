@@ -136,6 +136,8 @@ pre{white-space:pre-wrap;font-size:12px;color:#c3c9d6;margin:0;padding:12px;font
 .hbox.on{display:block}.hbox b{color:var(--text)}
 .sum{padding:12px 14px;font-size:14px;line-height:1.75}.sum .row2{display:flex;gap:8px}.sum .k{color:var(--muted);flex:0 0 4.3em}
 .sum .todo{margin-top:8px;padding:8px 10px;border-radius:8px;background:#17150e;border-left:3px solid var(--gold)}
+.sum .act{margin:0 0 10px;padding:10px 12px;border-radius:8px;background:#1d1414;border-left:3px solid var(--up);line-height:1.7}
+.sum .act b{color:var(--text)}
 .warn{margin:10px 16px 0;padding:9px 12px;border-radius:8px;background:#2a1414;color:#ffb0b0;font-size:13px}
 .fsbtn{background:none;border:1px solid var(--line);color:var(--muted);border-radius:6px;font-size:12px;padding:1px 7px;cursor:pointer;margin-left:4px}
 html.big{font-size:17px}html.big body{font-size:17px}html.big .sec h2{font-size:16px}html.big .meta,html.big .s{font-size:13.5px}html.big .hbox{font-size:15px}
@@ -226,10 +228,11 @@ html.big{font-size:17px}html.big body{font-size:17px}html.big .sec h2{font-size:
     <div class="search"><input id="q" type="search" placeholder="搜尋代號或名稱" autocomplete="off"></div>
     <div class="toolbar" id="grpBar"></div>
     <div class="toolbar" id="sortBar" style="padding-top:0"></div>
+    <div class="meta num" id="qLive" style="padding:0 16px 6px"></div>
     <div class="qhead"><div></div><div>股票</div><div>成交</div><div>漲跌幅</div><div>條件</div></div>
     <div id="quoteList"></div>
     <button class="more" id="moreBtn" hidden>顯示更多</button>
-    <p class="note">條件點：突破 20 日高、站上 MA20、MA20 &gt; MA60、量比 &gt; 1.5（全亮＝突破訊號）。紅漲綠跌，資料為收盤後行情。☆ 加入自選股（只存在這台裝置）。</p>
+    <p class="note">條件點：突破 20 日高、站上 MA20、MA20 &gt; MA60、量比 &gt; 1.5（全亮＝突破訊號）。紅漲綠跌，盤中約 3 分鐘更新一次（量比是推估全天），收盤後 16:30 換成正式資料；條件點、訊號都是用前一天收盤算的。☆ 加入自選股（只存在這台裝置）。</p>
   </section>
 
   <section class="view" id="v-stock">
@@ -239,7 +242,7 @@ html.big{font-size:17px}html.big body{font-size:17px}html.big .sec h2{font-size:
         <div class="meta" id="sMeta"></div></div>
       <div><div class="px num" id="sPx"></div><div class="chg num" id="sChg"></div></div>
     </div>
-    <div class="sec" style="margin:8px 0 0"><h2 data-h="sprice" style="margin:0 16px 4px">價格 <small>收盤後行情</small></h2></div>
+    <div class="sec" style="margin:8px 0 0"><h2 data-h="sprice" style="margin:0 16px 4px">價格 <small id="sPxNote">收盤後行情</small></h2></div>
     <div class="grid4 num" id="sOhlc"></div>
     <div class="sec" style="margin:8px 0 0"><h2 data-h="kline" style="margin:0 16px 4px">K 線圖</h2></div>
     <div class="toolbar" id="rangeBar" style="padding-bottom:0"></div>
@@ -307,7 +310,42 @@ D.stocks.forEach(s=>{ s.bars = s.bars.map(b=>typeof b[0]==="number"?[DATES[b[0]]
 let watch = new Set(store.get("watch", []));
 const saveWatch = () => store.set("watch", [...watch]);
 const wk=d=>d?"（"+"日一二三四五六"[new Date(d+"T00:00:00+08:00").getDay()]+"）":"";
-$("#hdrDate").textContent = "行情 " + (D.dataDate||"").slice(5).replace("-","/") + wk(D.dataDate);
+/* ========== 盤中即時行情：盤中監控每 3 分鐘抓全市場約 450 檔（LIVE.snap），蓋在昨天收盤的資料上；16:30 正式資料出來後自動改回正式資料 ========== */
+const stockById = byId;
+const BASEK=["close","chg","chgPct","open","high","low","prev","vol","value","volRatio","limitUp","limitDown"];
+D.stocks.forEach(s=>{ s._b=Object.fromEntries(BASEK.map(k=>[k,s[k]]));
+  const v=s.bars.slice(-20).map(b=>b[5]).filter(x=>x>0); s.avgVol=v.length?Math.round(v.reduce((a,b)=>a+b,0)/v.length):null; });
+let liveOn=false, liveT="", liveKey=null;
+function applyLiveSnap(){
+  const L=window.LIVE, td=todayStr();
+  const ok=!!(L && L.date===td && L.trading!==false && L.date>(D.dataDate||"") && L.snap && L.snap.q);
+  const key = ok ? L.date+" "+L.updated : "";
+  if(key===liveKey) return false;
+  liveKey=key; liveOn=ok; liveT= ok ? (L.snap.t||(L.updated||"").slice(0,5)) : "";
+  const q = ok ? {...L.snap.q} : {};
+  if(ok) (L.rows||[]).forEach(r=>{ if(r.price) q[r.id]=[r.price,r.pct,r.vol,r.open,r.high,r.low]; });
+  const n=new Date(Date.now()+8*3600e3), el=Math.min(Math.max(n.getUTCHours()*60+n.getUTCMinutes()-540,30),265);
+  D.stocks.forEach(s=>{
+    Object.assign(s,s._b); s.live=null;
+    const v=q[s.id]; if(!v||!v[0]) return;
+    const [px,pct,vol,o,h,l]=v, pv = pct!=null ? px/(1+pct/100) : s._b.close;
+    s.live=true; s.prev=+pv.toFixed(2); s.close=px; s.chgPct=pct??0; s.chg=+(px-pv).toFixed(2);
+    s.open=o||px; s.high=Math.max(h||px,px); s.low=Math.min(l||px,px); s.vol=vol;
+    s.value = vol!=null ? +(px*vol/1e5).toFixed(2) : null;
+    s.volRatio = s.avgVol&&vol!=null ? +(vol*265/el/s.avgVol).toFixed(2) : null;
+    s.limitUp=null; s.limitDown=null;
+  });
+  return true;
+}
+function liveMarket(){
+  const st=D.stocks.filter(s=>s.live), G={};
+  st.forEach(s=>{ const g=G[s.group]=G[s.group]||{group:s.group,n:0,up:0,down:0,sum:0,value:0}; g.n++; g.up+=s.chgPct>0; g.down+=s.chgPct<0; g.sum+=s.chgPct||0; g.value+=s.value||0; });
+  return {...(D.market||{}), up:st.filter(s=>s.chgPct>0).length, down:st.filter(s=>s.chgPct<0).length, flat:st.filter(s=>s.chgPct===0).length,
+    groups:GROUPS.filter(g=>G[g]).map(g=>({...G[g],avg:+(G[g].sum/G[g].n).toFixed(2)}))};
+}
+const liveLbl=()=>liveT>="13:30"?"今日收盤(暫定)":"盤中 "+liveT;   // 13:30 收盤後到 16:30 正式資料出來前
+function setHdr(){ $("#hdrDate").textContent = liveOn ? liveLbl() : "行情 " + (D.dataDate||"").slice(5).replace("-","/") + wk(D.dataDate); }
+applyLiveSnap(); setHdr();
 $("#hdrSub").textContent = (D.scope==="all"?"全上市 "+D.stocks.length+" 檔":"原 10 檔")+"｜只模擬，不下單｜更新於 " + D.generatedAt;
 
 /* ========== 指標 ========== */
@@ -450,14 +488,16 @@ const RANKS = [["gain","漲幅"],["loss","跌幅"],["value","成交值"],["vr","
 let rankKey = store.get("rank","gain");
 function renderHome(){
   if(typeof renderSummary==="function") renderSummary();
-  const m=D.market||{};
-  const tx=(m.taiex||[]).filter(x=>x[1]!=null);
+  const m=liveOn?liveMarket():(D.market||{});
+  let tx=(m.taiex||[]).filter(x=>x[1]!=null);
+  const LI=liveOn&&window.LIVE.index;
+  if(LI&&LI.price&&tx.length&&tx[tx.length-1][0]<window.LIVE.date) tx=[...tx,[window.LIVE.date,LI.price]];
   if(tx.length>=2){
-    const a=tx[tx.length-1][1], b=tx[tx.length-2][1];
-    $("#idxVal").textContent=fmt(a); $("#idxChg").innerHTML=`<span class="${cls(a-b)}" style="font-size:16px;font-weight:600">${sign(a-b)}${fmt(a-b)}　${sign(a-b)}${fmt((a/b-1)*100)}%</span>`;
+    const a=tx[tx.length-1][1], b= LI&&LI.price&&LI.pct!=null ? LI.price/(1+LI.pct/100) : tx[tx.length-2][1];
+    $("#idxVal").textContent=fmt(a); $("#idxChg").innerHTML=`<span class="${cls(a-b)}" style="font-size:16px;font-weight:600">${sign(a-b)}${fmt(a-b)}　${sign(a-b)}${fmt((a/b-1)*100)}%</span>`+(LI&&LI.price?`<div class="meta">盤中 ${esc(window.LIVE.quoteTime||liveT)}</div>`:"");
     drawLineChart($("#idxSpark"),[{name:"加權",color:a>=b?"#ff4d4f":"#20c06a",points:tx.slice(-120).map(x=>({t:x[0],v:x[1]}))}],{noAxis:true,bg:"#121722"});
   } else { $("#idxVal").textContent="—"; $("#idxChg").innerHTML='<span class="meta">需要全上市資料</span>'; }
-  $("#breadth").innerHTML = m.up!=null ? `<span class="up">上漲 ${m.up}</span><span class="down">下跌 ${m.down}</span><span class="flat">平盤 ${m.flat}</span><span class="meta">（${D.scope==="all"?"流動性足夠的上市股":"原 10 檔"}）</span>` : "";
+  $("#breadth").innerHTML = m.up!=null ? `<span class="up">上漲 ${m.up}</span><span class="down">下跌 ${m.down}</span><span class="flat">平盤 ${m.flat}</span><span class="meta">（${D.scope==="all"?"流動性足夠的上市股":"原 10 檔"}${liveOn?"，"+liveLbl():""}）</span>` : "";
   const rg=D.regime;
   $("#regime").innerHTML = rg ? `<div class="regime ${rg.bull?"bull":"bear"}">${rg.bull?"大盤在季線之上（多頭）":"⛔ 大盤在季線 "+fmt0(rg.ma60)+" 之下（空頭）"+(rg.stop.length?"："+rg.stop.join("、")+"策略暫停":"，請保守")}</div>` : "";
   renderLedgerMini();
@@ -467,11 +507,22 @@ function renderHome(){
   const short={"跳空策略":"跳空","晨星策略":"晨星","突破策略":"突破"};
   const byId={}; picks.forEach(p=>{(byId[p.id]=byId[p.id]||{...p,sigs:[]}).sigs.push(short[p.strategy]||p.strategy);});
   const multi=Object.values(byId).filter(x=>x.sigs.length>=2).sort((a,b)=>b.sigs.length-a.sigs.length||b.chgPct-a.chgPct);
-  const okKey = pickKey==="MULTI" ? multi.length>0 : tiers.some(([t])=>t===pickKey && picks.some(p=>p.strategy===t));
-  if(!okKey) pickKey = multi.length ? "MULTI" : (tiers.find(([t])=>picks.some(p=>p.strategy===t))||tiers[0])[0];
-  $("#pickBar").innerHTML = (multi.length?`<button class="chip sm ${pickKey==="MULTI"?"on":""}" data-p="MULTI">🎯 多訊號 ${multi.length}</button>`:"")
+  const LVp=window.LIVE, preNow = LVp && LVp.date===todayStr() && LVp.preclose && !(picks[0] && picks[0].date===todayStr()) ? LVp.preclose : null;
+  const okKey = pickKey==="PRE" ? !!preNow : pickKey==="MULTI" ? multi.length>0 : tiers.some(([t])=>t===pickKey && picks.some(p=>p.strategy===t));
+  if(!okKey) pickKey = preNow ? "PRE" : multi.length ? "MULTI" : (tiers.find(([t])=>picks.some(p=>p.strategy===t))||tiers[0])[0];
+  $("#pickBar").innerHTML = (preNow?`<button class="chip sm ${pickKey==="PRE"?"on":""}" data-p="PRE">⏰ 今天收盤前 ${(preNow.buys||[]).filter(b=>!b.flag).length}</button>`:"")
+    + (multi.length?`<button class="chip sm ${pickKey==="MULTI"?"on":""}" data-p="MULTI">🎯 多訊號 ${multi.length}</button>`:"")
     + tiers.map(([t,l])=>`<button class="chip sm ${t===pickKey?"on":""}" data-p="${t}">${l} ${picks.filter(p=>p.strategy===t).length}</button>`).join("");
   if(!picks.length){ $("#pickList").innerHTML='<div class="empty">今天沒有股票符合策略訊號。</div>'; }
+  else if(pickKey==="PRE" && preNow){
+    const bs=preNow.buys||[];
+    $("#pickList").innerHTML = `<div class="meta" style="padding:8px 12px">${esc(preNow.t)} 照當下價量「快要符合」規則的股票。想收盤前買，要在 13:30 前下單；最後幾分鐘價格會變，正式訊號以 16:30 為準。</div>`
+      + (bs.length? bs.map(b=>`<div class="pick" data-id="${esc(b.id)}">
+        <div><span class="n">${esc(b.name)}</span> <span class="meta">${esc(b.id)}</span> <span class="badge gap">${esc(b.w)}</span>${b.flag?`<span class="badge" style="background:#3a1a1a;color:#ff9a9a">${esc(b.flag)}</span>`:""}${b.notice?'<span class="badge" style="background:#3a1a1a;color:#ff9a9a">注意股</span>':""}</div>
+        <div class="num ${cls(b.pct)}" style="text-align:right;font-weight:600">${fmt(b.px)}<span style="font-size:12px"> ${sign(b.pct)}${fmt(b.pct)}%</span></div>
+        <div class="s">13:15 量比約 ${fmt(b.vr,1)}</div><div class="s num" style="text-align:right">${b.flag?"不建議":"可考慮"}</div></div>`).join("")
+        : '<div class="empty">今天收盤前沒有接近條件的股票</div>');
+  }
   else if(pickKey==="MULTI"){
     const mh=D.research?.robust?.multi;
     const hist = mh ? `<div class="meta" style="padding:8px 12px;line-height:1.6">歷史比較（3 年全上市，持有 20 日，比隨便買多賺）：`
@@ -481,7 +532,7 @@ function renderHome(){
         <div><span class="n">${esc(p.name)}</span> <span class="meta">${esc(p.id)}</span> ${p.sigs.map(x=>`<span class="badge gap">${esc(x)}</span>`).join("")}${p.sigs.length===3?'<span class="badge" style="background:#f5c66b;color:#1a1200">全中</span>':""}${(p.flag||"").split("；").filter(Boolean).map(f=>`<span class="badge" style="background:#3a1a1a;color:#ff9a9a">${esc(f)}</span>`).join("")}</div>
         <div class="num ${cls(p.chgPct)}" style="text-align:right;font-weight:600">${fmt(p.close)}<span style="font-size:12px"> ${sign(p.chgPct)}${fmt(p.chgPct)}%</span></div>
         <div class="s">${esc(p.industry)}｜量比 ${fmt(p.volRatio)}</div>
-        <div class="s num" style="text-align:right">明日漲停 ${fmt(p.limitUp)}</div></div>`).join("") + hist;
+        <div class="s num" style="text-align:right">${liveOn&&stockById[p.id]?.live?`現在 <span class="${cls(stockById[p.id].chgPct)}">${sign(stockById[p.id].chgPct)}${fmt(stockById[p.id].chgPct)}%</span>`:`明日漲停 ${fmt(p.limitUp)}`}</div></div>`).join("") + hist;
   }
   else {
     $("#pickList").innerHTML = tiers.filter(([t])=>t===pickKey).map(([t,label])=>{ const ps=picks.filter(p=>p.strategy===t); if(!ps.length) return '<div class="empty">這個策略今天沒有訊號</div>';
@@ -489,19 +540,19 @@ function renderHome(){
         <div><span class="n">${esc(p.name)}</span> <span class="meta">${esc(p.id)}</span> <span class="badge grp">${esc(p.group)}</span>${(p.flag||"").split("；").filter(Boolean).map(f=>`<span class="badge" style="background:#3a1a1a;color:#ff9a9a">${esc(f)}</span>`).join("")}</div>
         <div class="num ${cls(p.chgPct)}" style="text-align:right;font-weight:600">${fmt(p.close)}<span style="font-size:12px"> ${sign(p.chgPct)}${fmt(p.chgPct)}%</span></div>
         <div class="s">${esc(p.industry)}｜${p.strategy==="跳空策略"?"跳空":p.strategy==="晨星策略"?"高於長黑中點":"突破"} ${fmt(p.sigPct)}%｜量比 ${fmt(p.volRatio)}</div>
-        <div class="s num" style="text-align:right">明日漲停 ${fmt(p.limitUp)}</div></div>`).join(""); }).join("");
+        <div class="s num" style="text-align:right">${liveOn&&stockById[p.id]?.live?`現在 <span class="${cls(stockById[p.id].chgPct)}">${sign(stockById[p.id].chgPct)}${fmt(stockById[p.id].chgPct)}%</span>`:`明日漲停 ${fmt(p.limitUp)}`}</div></div>`).join(""); }).join("");
   }
   const groups=(m.groups||[]);
   $("#grpGrid").innerHTML = groups.map(g=>`<div class="gcell" data-g="${esc(g.group)}"><div class="g">${esc(g.group)}</div><div class="a ${cls(g.avg)}">${sign(g.avg)}${fmt(g.avg)}%</div><div class="c">${g.n} 檔｜<span class="up">${g.up}</span>/<span class="down">${g.down}</span></div></div>`).join("") || '<div class="empty">尚無資料</div>';
   $("#rankBar").innerHTML = RANKS.map(([k,l])=>`<button class="chip sm ${k===rankKey?"on":""}" data-k="${k}">${l}</button>`).join("");
-  const latest = D.stocks.filter(s=>s.date===D.dataDate);
+  const latest = liveOn ? D.stocks.filter(s=>s.live) : D.stocks.filter(s=>s.date===D.dataDate);
   const by={gain:(a,b)=>b.chgPct-a.chgPct, loss:(a,b)=>a.chgPct-b.chgPct, value:(a,b)=>(b.value||0)-(a.value||0), vr:(a,b)=>(b.volRatio||0)-(a.volRatio||0),
     foreign:(a,b)=>(b.inst?.f??-1e12)-(a.inst?.f??-1e12), trust:(a,b)=>(b.inst?.t??-1e12)-(a.inst?.t??-1e12)}[rankKey];
   let list=[...latest].sort(by);
   if(rankKey==="foreign"||rankKey==="trust") list=list.filter(s=>s.inst);
   list=list.slice(0,10);
   const val=s=>rankKey==="value"?`${fmt(s.value,1)} 億`: rankKey==="vr"?`量比 ${fmt(s.volRatio)}`: rankKey==="foreign"?`${sign(s.inst.f)}${fmt0(s.inst.f)} 張`: rankKey==="trust"?`${sign(s.inst.t)}${fmt0(s.inst.t)} 張`:"";
-  $("#rankNote").textContent = (rankKey==="foreign"||rankKey==="trust") ? (list[0]?.inst?.date||"") : "";
+  $("#rankNote").textContent = (rankKey==="foreign"||rankKey==="trust") ? (list[0]?.inst?.date||"")+" 收盤後" : liveOn ? liveLbl()+(rankKey==="vr"&&liveT<"13:30"?"（推估全天）":"") : (D.dataDate||"")+" 收盤";
   $("#rankList").innerHTML = list.length ? list.map((s,i)=>`<div class="rank num" data-id="${esc(s.id)}"><span class="i">${i+1}</span><span><b>${esc(s.name)}</b> <span class="meta">${esc(s.id)}</span></span><span class="meta">${val(s)}</span><span class="${cls(s.chgPct)}" style="min-width:64px;text-align:right">${sign(s.chgPct)}${fmt(s.chgPct)}%</span></div>`).join("") : '<div class="empty">尚無資料（三大法人需執行 fetch_market_extras.py）</div>';
 }
 let pickKey = store.get("pickKey","跳空策略");
@@ -546,22 +597,33 @@ let showCand=false, showAllAlerts=false;
 $("#liveList").addEventListener("click",e=>{ if(e.target.id==="candTgl"){ showCand=!showCand; renderLive(); return; } const r=e.target.closest(".lrow"); if(r && byId[r.dataset.id]) openStock(r.dataset.id);});
 $("#alertList").addEventListener("click",e=>{ if(e.target.id==="alTgl"){ showAllAlerts=!showAllAlerts; renderLive(); return; } const a=e.target.closest(".alert"); if(a) a.classList.toggle("clamp");});
 let liveSrc="";
-async function reloadLive(){
+// 新的即時資料進來：重算即時行情，重畫現在這一頁（首頁、行情、個股都會跟著更新）
+function onLive(){
+  const changed=applyLiveSnap(); setHdr();
+  if(current==="v-home"){ renderHome(); renderLive(); }
+  else if(changed && current==="v-quotes"){ renderHome(); renderQuotes(); }
+  else if(changed && current==="v-stock") renderStock();
+}
+let lastLiveFetch=0;
+async function reloadLive(force){
   const h=new Date().getHours()*60+new Date().getMinutes();
-  if(document.hidden || h<8*60+45 || h>14*60) return;
+  if(document.hidden || h<8*60+45 || h>17*60) return;
+  if(h>13*60+40 && force!==true && Date.now()-lastLiveFetch<600000) return;   // 收盤後 10 分鐘讀一次就好
+  lastLiveFetch=Date.now();
   // 公開網頁：有設定 Firebase 時直接讀即時資料（約 1 分鐘內同步）；本機有 live_private.js 時以本機為準
   if(D.liveUrl && !(window.LIVE&&window.LIVE.private)){
     try{ const r=await fetch(D.liveUrl+"/live/data.json?t="+Date.now(),{cache:"no-store"});
       const j=r.ok?await r.json():null;
-      if(j&&j.date){ window.LIVE=j; liveSrc="即時"; if(current==="v-home") renderLive(); return; } }catch(e){}
+      if(j&&j.date){ window.LIVE=j; liveSrc="即時"; onLive(); return; } }catch(e){}
   }
   liveSrc="";
   const load=(f,next)=>{ const sc=document.createElement("script"); sc.src=f+"?t="+Date.now();
     sc.onload=()=>{ sc.remove(); next&&next(); }; sc.onerror=()=>{ sc.remove(); next&&next(); }; document.head.appendChild(sc); };
   // 本機有 live_private.js（含實際持股）時以它為準；公開網頁上沒有這個檔
-  load("live.js",()=>load("live_private.js",()=>{ if(current==="v-home") renderLive(); }));
+  load("live.js",()=>load("live_private.js",()=>onLive()));
 }
 setInterval(reloadLive, D.liveUrl?30000:60000);
+setTimeout(()=>reloadLive(true), 300);
 // 每 5 分鐘檢查網頁有沒有新版資料（16:30 收盤更新後），有就自動重新整理
 async function checkVersion(){
   if(document.hidden) return;
@@ -616,6 +678,7 @@ function renderQuotes(){
       <div class="num"><span class="pill ${c}">${sign(s.chgPct)}${fmt(s.chgPct)}%</span></div>
       <div><div class="dots">${dots}</div><div class="qside num">${sortKey==="value"?fmt(s.value,1)+"億":"量比 "+fmt(s.volRatio)}</div></div>
     </div>`;}).join("") : `<div class="empty">${grpKey==="自選"?"還沒有自選股，點 ☆ 加入。":"沒有符合的股票。"}</div>`;
+  $("#qLive").innerHTML = liveOn ? (liveT>="13:30" ? `<span class="badge" style="background:#3a2f12;color:#f5c66b">今日收盤（暫定）</span> 16:30 會換成正式資料` : `<span class="badge" style="background:#3a1a1a;color:#ff9a9a">盤中即時</span> ${esc(liveT)} 的價格（約 3 分鐘更新；量比是推估全天）`) : `${esc(D.dataDate||"")}${wk(D.dataDate)} 收盤行情`;
   $("#moreBtn").hidden = arr.length<=limit; $("#moreBtn").textContent=`顯示更多（共 ${arr.length} 檔）`;
 }
 $("#grpBar").addEventListener("click",e=>{const b=e.target.closest(".chip"); if(!b) return; grpKey=b.dataset.g; store.set("grp",grpKey); limit=80; renderQuotes();});
@@ -646,10 +709,11 @@ function renderStock(){
   document.querySelectorAll("#rangeBar .chip").forEach(b=>b.classList.toggle("on",+b.dataset.range===range));
   document.querySelectorAll("#subBar .chip").forEach(b=>b.classList.toggle("on",b.dataset.sub===subInd));
   const c=cls(s.chg);
-  $("#sName").textContent=s.name; $("#sCode").textContent=s.id; $("#sMeta").textContent=`${s.group}｜${s.industry}｜收盤 ${s.date}`;
+  $("#sName").textContent=s.name; $("#sCode").textContent=s.id; $("#sMeta").textContent=`${s.group}｜${s.industry}｜`+(s.live?liveLbl()+(liveT<"13:30"?"（約 3 分鐘更新）":"，16:30 換正式資料"):`收盤 ${s.date}`);
+  $("#sPxNote").textContent = s.live ? liveLbl() : `${s.date} 收盤後行情`;
   $("#sPx").className="px num "+c; $("#sPx").textContent=fmt(s.close);
   $("#sChg").className="chg num "+c; $("#sChg").textContent=`${sign(s.chg)}${fmt(s.chg)}  ${sign(s.chgPct)}${fmt(s.chgPct)}%`;
-  $("#sOhlc").innerHTML=[["開盤",s.open],["最高",s.high],["最低",s.low],["昨收",s.prev],["成交量(張)",s.vol,0],["成交值(億)",s.value,1],["明日漲停",s.limitUp],["明日跌停",s.limitDown]]
+  $("#sOhlc").innerHTML=[["開盤",s.open],["最高",s.high],["最低",s.low],["昨收",s.prev],["成交量(張)",s.vol,0],["成交值(億)",s.value,1],...(s.live?[["20日均量(張)",s.avgVol,0],["量比(推估)",s.volRatio]]:[["明日漲停",s.limitUp],["明日跌停",s.limitDown]])]
     .map(([k,v,n])=>`<div>${k}<b class="${k==="最高"?"up":k==="最低"?"down":""}">${fmt(v,n??2)}</b></div>`).join("");
   const iv=s.inst, va=s.val;
   $("#instDate").textContent = iv ? `法人 ${iv.date}` : "（尚無資料）";
@@ -658,7 +722,7 @@ function renderStock(){
     cell("投信連買",iv?iv.tStreak+" 天":null)+cell("本益比",va?.pe,1)+cell("殖利率",va?.yld!=null?fmt(va.yld)+"%":null)+cell("淨值比",va?.pb,2);
   const cnd=s.cond;
   const row=(x,vtxt)=>`<div class="cond"><div class="l"><span class="ck ${x.ok?"ok":"no"}">${x.ok?"✓":"·"}</span>${esc(x.label)}</div><div class="v num">${vtxt}</div></div>`;
-  $("#sCond").innerHTML=
+  $("#sCond").innerHTML=(s.live?`<div class="meta" style="padding:6px 12px">下面的條件是用 ${esc(s.date)} 收盤算的；今天的要等收盤後 16:30 更新。</div>`:"")+
     `<div class="cond"><div class="l"><span class="ck ${s.gapSignal?"ok":"no"}">${s.gapSignal?"✓":"·"}</span><span><b>跳空策略</b>：開盤高於昨高 1%、收紅、量比 &gt; 1.5</span></div><div class="v num">跳空 ${fmt(s.gapPct)}%<br>量比 ${fmt(s.gapVolRatio)}</div></div>`+
     `<div class="cond"><div class="l"><span class="ck ${s.starSignal?"ok":"no"}">${s.starSignal?"✓":"·"}</span><span><b>晨星策略</b>：前天長黑 2%↑、昨天小K、今天紅K收過長黑一半</span></div><div class="v num">前天 ${fmt(s.starDrop)}%<br>高於中點 ${fmt(s.starPct)}%</div></div>`+
     row(cnd.breakout,`收 ${fmt(cnd.breakout.value)} ／ 高 ${fmt(cnd.breakout.target)}`)+
@@ -672,8 +736,9 @@ function renderStock(){
     if(pend) return `<div><b>${esc(a.title)}</b>：買進候選（${pend.Signal_Date} 訊號）</div>`;
     return ""; }).filter(Boolean);
   $("#sAcct").innerHTML = lines.length ? lines.join("") : "正式帳本目前沒有持有，也沒有買進候選。";
-  const bars = range ? s.bars.slice(-range) : s.bars;
-  const indAll = indicators(s.bars), off = s.bars.length - bars.length;
+  const td=todayStr(), allB = s.live && s.bars.length && s.bars[s.bars.length-1][0]<td ? [...s.bars,[td,s.open,s.high,s.low,s.close,s.vol||0]] : s.bars;
+  const bars = range ? allB.slice(-range) : allB;
+  const indAll = indicators(allB), off = allB.length - bars.length;
   const ind = Object.fromEntries(Object.entries(indAll).map(([k,v])=>[k,v.slice(off)]));
   const legendSub = {vol:"<span>柱：成交量（張）</span>", kd:`<span><i style="background:${C.k}"></i>K</span><span><i style="background:${C.d}"></i>D</span>`, macd:`<span><i style="background:${C.k}"></i>DIF</span><span><i style="background:${C.d}"></i>MACD</span><span>柱：OSC</span>`, rsi:`<span><i style="background:${C.k}"></i>RSI6</span><span><i style="background:${C.d}"></i>RSI14</span>`}[subInd];
   $("#kLegend").innerHTML=`<span><i style="background:${C.ma20}"></i>MA20</span><span><i style="background:${C.ma60}"></i>MA60</span>${legendSub}`;
@@ -780,7 +845,7 @@ const HELP={
  rank:"<b>今天的排行榜。</b>漲最多、跌最多、成交金額最大、量比最大（今天比平常熱鬧幾倍），以及外資、投信買最多的股票。點股票看詳細。",
  etf:"<b>主動式 ETF＝由基金經理人自己挑股、隨時換股的 ETF</b>（代號最後有 A，例如 00981A、00992A）；0050 則是照規則買台灣前 50 大公司。<br>這裡比較每檔<b>從上市那天起</b>的含配息報酬，和<b>同一段時間買 0050</b> 相比多賺或少賺多少。綠色＝輸給 0050。<br>注意：多數上市都不到一年半，時間太短，贏或輸都可能是運氣；主動式的管理費也比 0050 高。只觀察，不是推薦。",
  quotes:"<b>所有成交夠熱絡的上市股票。</b>可以打代號或名稱搜尋、選類股、換排序方式。右邊 4 個小點是「突破」規則的 4 個條件，4 個都亮＝今天符合突破。點 ☆ 可以加到自選（只存在這支手機或電腦）。",
- sprice:"<b>今天收盤後的價格。</b>開盤＝第一筆成交價；最高、最低＝今天的最高與最低價；昨收＝昨天收盤價。成交量用「張」（1 張＝1,000 股），成交值用「億元」。<br><b>明日漲停／跌停</b>＝明天最多能漲到、跌到的價格（一天最多 ±10%）。",
+ sprice:"<b>盤中（09:00～13:30）是即時價格，約 3 分鐘更新一次；收盤後 16:30 換成正式收盤資料。</b>開盤＝第一筆成交價；最高、最低＝今天的最高與最低價；昨收＝昨天收盤價。成交量用「張」（1 張＝1,000 股），成交值用「億元」。<br><b>明日漲停／跌停</b>＝明天最多能漲到、跌到的價格（一天最多 ±10%）。",
  kline:"<b>每一根小柱子是一天：</b>紅色＝那天收盤比開盤高（漲），綠色＝收盤比開盤低（跌），上下細線是當天最高、最低價。<br><b>黃線（月線）</b>、<b>紫線（季線）</b>是過去 20 天、60 天的平均價。股價在線上面＝偏強，跌到線下面＝偏弱。<br>下面可以切換：<b>成交量</b>（每天買賣多少張）、<b>KD</b>（80 以上＝短線漲太多、20 以下＝跌太多）、<b>MACD</b>（兩條線往上交叉偏好、往下交叉偏壞）、<b>RSI</b>（漲跌力道，跟 KD 類似）。新手先看黃線和紫線就好。",
  inst:"<b>大戶在買還是賣：</b>外資（外國機構）、投信（基金公司）、自營商（券商），正數＝買進、負數＝賣出，單位是張。<b>外資 5 日</b>＝最近 5 天加起來；<b>投信連買</b>＝連續買了幾天。<br><b>本益比</b>＝股價是公司一年獲利的幾倍，越高越貴；<b>殖利率</b>＝股利 ÷ 股價，像存款利息；<b>淨值比</b>＝股價是公司帳面價值的幾倍。",
  cond:"<b>逐條檢查這檔股票今天有沒有符合挑股規則。</b>✓＝符合、·＝不符合，右邊是實際數字，可以看出還差多少。一個規則裡全部打勾，這檔才會出現在首頁的訊號清單。",
@@ -827,28 +892,53 @@ function renderSummary(){
   if(stale) $("#staleWarn").innerHTML=`⚠️ 網頁資料停在 ${esc(D.dataDate)}${wk(D.dataDate)}，應該要有 ${esc(exp)}${wk(exp)} 的資料。若那天是休市日可忽略；否則可能每日更新沒有跑，請看 Telegram 是否有失敗通知。`;
   $("#sumDate").textContent = `資料 ${D.dataDate||""}${wk(D.dataDate)}`;
   const L=[]; const row=(k,v)=>L.push(`<div class="row2"><span class="k">${k}</span><span>${v}</span></div>`);
-  // 大盤
-  const tx=(D.market||{}).taiex||[], rg=D.regime;
-  if(tx.length>1){ const a=tx[tx.length-1][1], b=tx[tx.length-2][1];
+  const LV=window.LIVE, today=todayStr(), liveToday=!!(LV && LV.date===today && LV.trading!==false);
+  const rg=D.regime, nm2=x=>esc((x.name||x.id||"").replace("主動",""));
+  if(liveToday) $("#sumDate").textContent = `盤中即時 ${LV.updated||""}${liveSrc?"（即時同步）":""}`;
+  // ⏰ 13:15 收盤前：今天要買／要賣（最重要，放最上面）
+  const pre = liveToday ? LV.preclose : null;
+  if(pre){
+    const buys=(pre.buys||[]).filter(b=>!b.flag), skip=(pre.buys||[]).filter(b=>b.flag);
+    let h=`<b>⏰ ${esc(pre.t)} 收盤前整理</b>（台股 13:30 收盤，要買要賣在這之前下單）<br>`;
+    h+=`🛒 <b>可以考慮收盤前買</b>：`+(buys.length? buys.map(b=>`${nm2(b)} ${esc(b.id)}（${esc(b.w)}，<span class="${cls(b.pct)}">${sign(b.pct)}${fmt(b.pct)}%</span>${b.notice?"，注意股":""}）`).join("、") : "今天沒有符合規則的股票");
+    if(skip.length) h+=`<br><span class="meta">⛔ 不建議：${skip.map(b=>`${nm2(b)}（${esc(b.flag)}）`).join("、")}</span>`;
+    if(LV.private) h+=`<br>💰 <b>你的持股今天該賣</b>：`+((pre.sells||[]).length? pre.sells.map(x=>`<b class="down">${nm2(x)}</b>（${esc(x.why)}）`).join("、") : "沒有");
+    h+=`<br><span class="meta">規則還在試用，只是提醒，不是叫你買賣；收盤後 16:30 才是正式訊號。</span>`;
+    L.push(`<div class="act">${h}</div>`);
+  }
+  // 大盤：盤中用即時報價，收盤後用正式資料
+  const tx=(D.market||{}).taiex||[];
+  if(liveToday && LV.index && LV.index.price){
+    const mk=liveOn?liveMarket():null;
+    row("大盤",`加權 ${fmt(LV.index.price)}（<span class="${cls(LV.index.pct)}">${sign(LV.index.pct)}${fmt(LV.index.pct)}%</span>）<span class="meta">盤中 ${esc(LV.quoteTime||"")}</span>`
+      +(mk&&mk.up+mk.down>0?`<br>上漲 <span class="up">${mk.up}</span> 檔、下跌 <span class="down">${mk.down}</span> 檔`+(mk.groups.length?`；最強 ${esc([...mk.groups].sort((a,b)=>b.avg-a.avg)[0].group)}、最弱 ${esc([...mk.groups].sort((a,b)=>a.avg-b.avg)[0].group)}`:""):"")+(rg&&!rg.bull?`，<b class='down'>整體偏弱（季線之下）</b>，突破暫停`:""));
+  } else if(tx.length>1){ const a=tx[tx.length-1][1], b=tx[tx.length-2][1];
     row("大盤",`加權 ${fmt(a)}（<span class="${cls(a-b)}">${sign(a-b)}${fmt((a/b-1)*100)}%</span>）`+(rg?`，${rg.bull?"整體偏強（在季線之上）":"<b class='down'>整體偏弱（跌破季線）</b>"}${!rg.bull&&rg.stop&&rg.stop.length?"，"+rg.stop.join("、")+"暫停":""}`:"")); }
-  // 訊號
+  // 今天開盤可買（昨天收盤的訊號，09:01 開盤檢查）＋現在漲跌
+  if(liveToday && (LV.open||[]).length){
+    const nowPct={}; (LV.rows||[]).forEach(r=>nowPct[r.id]=r.pct);
+    const okL=LV.open.filter(o=>o.ok && !o.stop), uniq=[...new Map(okL.map(o=>[o.id,o])).values()];
+    const up=uniq.filter(o=>(nowPct[o.id]??0)>0).length;
+    row("今天候選",`昨天收盤出訊號、今天開盤可買 ${uniq.length} 檔（現在 ${up} 檔上漲）：`+uniq.slice(0,8).map(o=>`${nm2(o)} <span class="${cls(nowPct[o.id])}">${nowPct[o.id]==null?"":sign(nowPct[o.id])+fmt(nowPct[o.id])+"%"}</span>`).join("、")+(uniq.length>8?"…":"")
+      +(LV.open.some(o=>o.stop)?`<br><span class="meta">突破候選因大盤偏弱暫停</span>`:""));
+  }
+  // 訊號（收盤後的正式訊號）
   const picks=D.picks||[]; const cnt=t=>picks.filter(p=>p.strategy===t).length;
-  if(picks.length){
+  const sigToday = picks.length && picks[0].date===today;
+  if(picks.length && (sigToday || !liveToday)){
     const by={}; picks.forEach(p=>{(by[p.id]=by[p.id]||{n:p.name,s:[]}).s.push(p.strategy.slice(0,2));});
     const multi=Object.entries(by).filter(([,v])=>v.s.length>=2);
     row("訊號",`${picks[0].date.slice(5).replace("-","/")} 收盤：跳空 ${cnt("跳空策略")}、晨星 ${cnt("晨星策略")}、突破 ${cnt("突破策略")}${rg&&!rg.bull?"（暫停）":""} 檔`
       +(multi.length?`；🎯 多訊號 ${multi.map(([id,v])=>esc(v.n)+"（"+v.s.join("＋")+"）").join("、")}`:"")+`<br><span class="meta">規則：下一個交易日開盤買、抱約一個月；還在試用，不是叫你買</span>`);
-  } else row("訊號","今天沒有股票符合策略");
-  // 持股（盤中資料）
-  const LV=window.LIVE;
-  if(LV && LV.date===todayStr()){
-    const real=(LV.rows||[]).filter(r=>r.role==="實際持股");
-    if(LV.private && real.length){
-      const bad=real.filter(r=>r.ret!=null&&r.ret<=-7), good=real.filter(r=>r.ret!=null&&r.ret>=15);
-      row("持股",`${real.length} 檔`+(bad.length?`，<b class="down">${bad.map(r=>esc(r.name)).join("、")} 虧損超過 7%</b>`:"")+(good.length?`，<b class="up">${good.map(r=>esc(r.name)).join("、")} 獲利超過 15%</b>`:"")+(bad.length||good.length?"":"，沒有觸及停損／停利"));
-    }
-    const al=(LV.alerts||[]).length; if(al) row("提醒",`今天 ${al} 則盤中提醒（詳見下方「提醒」）`);
+  } else if(!picks.length) row("訊號","最近一次收盤沒有股票符合策略");
+  // 你的持股（只有電腦本機看得到）
+  if(liveToday && LV.private && (LV.health||[]).length){
+    const H=LV.health, red=H.filter(x=>x.light.startsWith("🔴")), yel=H.filter(x=>x.light.startsWith("🟡")), grn=H.filter(x=>x.light.startsWith("🟢"));
+    row("我的持股",(red.length?`🔴 <b class="down">${red.map(x=>nm2(x)+"（"+esc(x.why.split("；")[0])+"）").join("、")}</b><br>`:"")
+      +(yel.length?`🟡 ${yel.map(x=>nm2(x)+"（"+esc(x.why.split("；")[0])+"）").join("、")}<br>`:"")
+      +(grn.length?`🟢 ${grn.map(x=>nm2(x)).join("、")} 續抱`:""));
   }
+  if(liveToday){ const al=LV.alerts||[]; if(al.length) row("提醒",`今天 ${al.length} 則，最新 ${esc(al[0].t)}：${esc(al[0].msg.split("\n")[0].slice(0,40))}`); }
   // 帳本
   const live=ACCTS.filter(a=>!a.replay);
   if(live.length){ const r=live.map(a=>[a,(a.daily[a.daily.length-1]||{}).Return_Pct]).filter(x=>x[1]!=null).sort((x,y)=>y[1]-x[1]);
