@@ -459,6 +459,8 @@ function drawLineChart(box, series, opt){
 const ACCTS = D.accounts||[];
 let acctMode = store.get("acctKey", ACCTS[0]?.key);
 if(!ACCTS.find(a=>a.key===acctMode)) acctMode = ACCTS[0]?.key;
+{ const a0=ACCTS.find(a=>a.key===acctMode);   // 上次看的帳本還沒有任何交易時，打開時先顯示持股最多的那本
+  if(a0 && !a0.replay && !a0.positions.length && !a0.trades.length){ const best=ACCTS.filter(a=>!a.replay).sort((x,y)=>y.positions.length-x.positions.length)[0]; if(best && best.positions.length) acctMode=best.key; } }
 let acct=null;
 const LIVE = ACCTS.filter(a=>!a.replay);
 const holdSet = new Set(LIVE.flatMap(a=>a.positions.map(p=>p.Stock_ID)));
@@ -754,7 +756,8 @@ function renderAcctBar(){
   const rows = ACCTS.filter(a=>a.replay===!!isRep);
   $("#acctBar").innerHTML = `<div style="width:100%"><div style="display:flex;gap:6px;margin-bottom:8px"><button class="chip sm ${!isRep?"on":""}" data-mode="live">正式（前進測試）</button><button class="chip sm ${isRep?"on":""}" data-mode="replay">歷史回放</button></div>
     <div class="card"><table class="mini num"><tr><th>帳本</th><th>報酬</th><th>持股</th><th>平倉／勝率</th></tr>${rows.map(a=>{ const d=a.daily[a.daily.length-1]||{}; const w=a.trades.length?Math.round(a.trades.filter(t=>t.Net_PnL>0).length/a.trades.length*100)+"%":"—";
-      return `<tr data-k="${esc(a.key)}" class="${a.key===acctMode?"on":""}"><td>${esc(a.title.replace("全上市｜","").replace(/｜(正式|回放)/,""))}</td><td class="${cls(d.Return_Pct)}">${sign(d.Return_Pct)}${fmt(d.Return_Pct)}%</td><td>${a.positions.length}</td><td>${a.trades.length}／${w}</td></tr>`;}).join("")}</table></div></div>`;
+      return `<tr data-k="${esc(a.key)}" class="${a.key===acctMode?"on":""}" style="cursor:pointer"><td>${a.key===acctMode?"▶ ":""}${esc(a.title.replace("全上市｜","").replace(/｜(正式|回放)/,""))}</td><td class="${cls(d.Return_Pct)}">${sign(d.Return_Pct)}${fmt(d.Return_Pct)}%</td><td>${a.positions.length}</td><td>${a.trades.length}／${w}</td></tr>`;}).join("")}</table>
+    <div class="meta" style="padding:8px 10px">👆 點一下帳本名稱，下面就換成那一本的持股、買進候選和買賣紀錄。${rows.every(a=>!a.trades.length)?"「平倉 0」是因為規則要抱 20 個交易日才賣，還沒到期。":""}</div></div></div>`;
 }
 $("#acctBar").addEventListener("click",e=>{
   const m=e.target.closest("[data-mode]"); if(m){ const want=m.dataset.mode; const k=(want==="replay"?"replay_":"live_")+acctBase(acctMode); acctMode = ACCTS.find(a=>a.key===k)?k:(ACCTS.find(a=>a.replay===(want==="replay"))||{}).key; }
@@ -765,7 +768,10 @@ function renderAcct(){
   renderAcctBar();
   const hint=$("#acctHint");
   if(acct?.replay){ hint.style.display="block"; hint.innerHTML="這是<b>歷史回放</b>（"+esc(acct.label)+"）：同一套規則從 2023-10 重跑到最新行情，用來驗證程式與檢視介面，<b>不是前進測試的成績</b>。"; }
-  else if(acct && !acct.trades.length && !acct.positions.length){ hint.style.display="block"; hint.innerHTML="正式帳本（"+esc(acct.label)+"）從 "+esc(acct.start)+" 開始記帳，目前還沒有交易。可切換到「回放」看有交易時的樣子。"; }
+  else if(acct && !acct.trades.length && !acct.positions.length){ hint.style.display="block"; const most=LIVE.filter(a=>a.positions.length).sort((x,y)=>y.positions.length-x.positions.length)[0];
+    hint.innerHTML="正式帳本（"+esc(acct.label)+"）從 "+esc(acct.start)+" 開始記帳，目前還沒有交易。"
+      +(acctBase(acct.key)==="TRIPLE_ALL"?"三個訊號同一天全中很少見（3 年只有 44 次，平均約一個月 1 次），開始記帳後還沒出現過。":"")
+      +(most?"<br>👆 點上面其他帳本就看得到假買進的持股，例如「"+esc(most.title.replace("全上市｜","").replace(/｜(正式|回放)/,""))+"」有 "+most.positions.length+" 檔。":"可切換到「回放」看有交易時的樣子。"); }
   else hint.style.display="none";
   if(!acct){ $("#kpis").innerHTML='<div class="kpi big"><div class="k">尚未建立帳本</div><div class="v">—</div></div>'; return; }
   const last=acct.daily[acct.daily.length-1]||{};
@@ -895,6 +901,10 @@ function renderSummary(){
   const LV=window.LIVE, today=todayStr(), liveToday=!!(LV && LV.date===today && LV.trading!==false);
   const rg=D.regime, nm2=x=>esc((x.name||x.id||"").replace("主動",""));
   if(liveToday) $("#sumDate").textContent = `盤中即時 ${LV.updated||""}${liveSrc?"（即時同步）":""}`;
+  // 盤中監控沒在跑（電腦睡著／沒開）：先講清楚，免得以為「收盤前清單」不見了
+  { const n0=new Date(Date.now()+8*3600e3), m0=n0.getUTCHours()*60+n0.getUTCMinutes(), wd0=n0.getUTCDay();
+    if(wd0>=1 && wd0<=5 && m0>=9*60+5 && m0<16*60+40 && !(LV && LV.date===today))
+      L.push(`<div class="act" style="border-left-color:#f5c66b">⚠️ <b>今天還沒收到盤中資料</b>：家裡電腦可能睡著了，或「盤中監控」沒開，所以即時行情和 13:15「收盤前可以買／該賣」都不會出現。<br><span class="meta">請到電腦按一下鍵盤叫醒它，雙擊「盤中監控.bat」（13:35 前才有用）。今天休市就不用理會。</span></div>`); }
   // ⏰ 13:15 收盤前：今天要買／要賣（最重要，放最上面）
   const pre = liveToday ? LV.preclose : null;
   if(pre){
@@ -951,7 +961,7 @@ function renderSummary(){
   let todo;
   if(wd===0||wd===6) todo="週末休市：可以看「研究」頁的每週結論，或複習名詞說明。";
   else if(m<9*60) todo="開盤前：看上方「今日策略訊號」，09:01 會推播開盤檢查（開盤就漲停的會放棄）。";
-  else if(m<13*60+15) todo="盤中：不用一直盯，電腦每分鐘監控，有異常會推 Telegram；持股健康看「盤中監控」。";
+  else if(m<13*60+15) todo="盤中：不用一直盯，電腦每分鐘監控，有異常會推 Telegram。13:15 會在這裡最上面列出「收盤前可以買／該賣」，Telegram 也會通知。";
   else if(m<13*60+30) todo="收盤前：13:15 已推播「收盤前買進候選」與該賣的持股，要買要賣請在 13:30 前下單。";
   else if(m<16*60+40) todo="收盤後：16:30 會自動更新今天的訊號與帳本，約 16:35 起重新整理就看得到。";
   else todo="盤後：今天的訊號已更新，明天開盤前決定要不要照「今日策略訊號」買；賣出以持有 20 個交易日為準。";
