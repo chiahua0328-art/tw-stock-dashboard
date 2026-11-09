@@ -166,10 +166,15 @@ html.big{font-size:17px}html.big body{font-size:17px}html.big .sec h2{font-size:
   <dt>🎯 多訊號</dt><dd>同一檔股票同一天符合 2 個以上規則。</dd>
   <dt>買進候選</dt><dd>昨天收盤後出訊號的股票，照規則「隔天一開盤買、抱 20 個交易日（約一個月）再賣」。只是候選，不是叫你買。</dd>
   <dt>收盤前買進候選（13:15）</dt><dd>台股 13:30 收盤。13:15 時看起來快要出訊號的股票，想在收盤前買可以參考；但最後幾分鐘價格會變，收盤後才確定。</dd></dl>
-  <h3>燈號（你的持股）</h3><dl>
-  <dt>🔴 該賣</dt><dd>已經抱滿 20 個交易日（規則到期），或已經虧超過 7%。</dd>
-  <dt>🟡 注意</dt><dd>走勢轉弱（跌破月線）、短時間漲太多或跌太多、快到停損、或已經賺超過 15%，要留意。</dd>
-  <dt>🟢 續抱</dt><dd>走勢正常，可以繼續抱。</dd></dl>
+  <h3>買賣字眼（網頁和 Telegram 都只用這幾個）</h3><dl>
+  <dt>🟢 可買</dt><dd>符合規則、現在買得到。</dd>
+  <dt>🟡 可買（小量）</dt><dd>符合規則，但已經比開盤漲 5% 以上，追高要少買。</dd>
+  <dt>⛔ 不買</dt><dd>漲停買不到、策略暫停（大盤在季線下的突破），或開盤就漲停。假錢帳本還是會照買來測試規則，真錢不要買。</dd>
+  <dt>🔴 賣</dt><dd>你的持股抱滿 20 個交易日（規則到期），或虧損達 7%（停損）。</dd>
+  <dt>🟡 注意（不用賣）</dt><dd>有警訊（急殺、跌破月線、爆量下跌、已經賺超過 15%…），但規則沒叫你賣。</dd>
+  <dt>🟢 續抱</dt><dd>走勢正常，可以繼續抱。</dd>
+  <dt>⚪ 不判斷</dt><dd>今天還沒有成交價，先不判斷。</dd>
+  <dt>只是通知</dt><dd>急漲、爆量、模擬帳本的變化等，不是買賣訊號。</dd></dl>
   <h3>常見名詞</h3><dl>
   <dt>大盤／加權指數</dt><dd>整個台股的平均表現，大盤漲代表大部分股票在漲。</dd>
   <dt>月線、季線</dt><dd>過去 20 天（約一個月）、60 天（約一季）的平均價格。股價在線的上面＝最近買的人大多賺錢、走勢偏強；跌到線下面＝偏弱。</dd>
@@ -520,9 +525,9 @@ function renderHome(){
     const bs=preNow.buys||[];
     $("#pickList").innerHTML = `<div class="meta" style="padding:8px 12px">${esc(preNow.t)} 照當下價量「快要符合」規則的股票。想收盤前買，要在 13:30 前下單；最後幾分鐘價格會變，正式訊號以 16:30 為準。</div>`
       + (bs.length? bs.map(b=>`<div class="pick" data-id="${esc(b.id)}">
-        <div><span class="n">${esc(b.name)}</span> <span class="meta">${esc(b.id)}</span> <span class="badge gap">${esc(b.w)}</span>${b.flag?`<span class="badge" style="background:#3a1a1a;color:#ff9a9a">${esc(b.flag)}</span>`:""}${b.notice?'<span class="badge" style="background:#3a1a1a;color:#ff9a9a">注意股</span>':""}</div>
+        <div><span class="n">${esc(b.name)}</span> <span class="meta">${esc(b.id)}</span> <span class="badge gap">${esc(b.w)}</span>${b.notice?'<span class="badge" style="background:#3a1a1a;color:#ff9a9a">注意股</span>':""}</div>
         <div class="num ${cls(b.pct)}" style="text-align:right;font-weight:600">${fmt(b.px)}<span style="font-size:12px"> ${sign(b.pct)}${fmt(b.pct)}%</span></div>
-        <div class="s">13:15 量比約 ${fmt(b.vr,1)}</div><div class="s num" style="text-align:right">${b.flag?"不建議":"可考慮"}</div></div>`).join("")
+        <div class="s">13:15 量比約 ${fmt(b.vr,1)}</div><div class="s num" style="text-align:right">${b.flag?`<span class="down">⛔ 不買（${esc(b.flag)}）</span>`:'<span class="up">🟢 可買</span>'}</div></div>`).join("")
         : '<div class="empty">今天收盤前沒有接近條件的股票</div>');
   }
   else if(pickKey==="MULTI"){
@@ -531,7 +536,7 @@ function renderHome(){
       + Object.entries(mh).map(([k,v])=>`${esc(k)} <b class="${cls(v.mean)}">${sign(v.mean)}${fmt(v.mean)}%</b>（${fmt0(v.n)} 筆${v.lo>0?"，扣運氣後仍贏":""}）`).join("；") + `</div>`
       : `<div class="meta" style="padding:8px 12px">同一天中 2 個以上訊號的股票；歷史上是否比只中 1 個好，穩健度檢驗跑完後會顯示在這裡。</div>`;
     $("#pickList").innerHTML = multi.map(p=>`<div class="pick" data-id="${esc(p.id)}">
-        <div><span class="n">${esc(p.name)}</span> <span class="meta">${esc(p.id)}</span> ${p.sigs.map(x=>`<span class="badge gap">${esc(x)}</span>`).join("")}${p.sigs.length===3?'<span class="badge" style="background:#f5c66b;color:#1a1200">全中</span>':""}${(p.flag||"").split("；").filter(Boolean).map(f=>`<span class="badge" style="background:#3a1a1a;color:#ff9a9a">${esc(f)}</span>`).join("")}</div>
+        <div><span class="n">${esc(p.name)}</span> <span class="meta">${esc(p.id)}</span> ${p.sigs.map(x=>`<span class="badge gap">${esc(x)}</span>`).join("")}${p.sigs.length===3?'<span class="badge" style="background:#f5c66b;color:#1a1200">全中</span>':""}${(p.flag||"").split("；").filter(Boolean).map(f=>`<span class="badge" style="background:#3a1a1a;color:#ff9a9a">${esc(f==="大盤空頭暫停"?"⛔ 不買（突破暫停）":f)}</span>`).join("")}${/大盤空頭暫停/.test(p.flag||"")?"":'<span class="badge" style="background:#14301f;color:#7ee2a8">🟢 可買（開盤）</span>'}</div>
         <div class="num ${cls(p.chgPct)}" style="text-align:right;font-weight:600">${fmt(p.close)}<span style="font-size:12px"> ${sign(p.chgPct)}${fmt(p.chgPct)}%</span></div>
         <div class="s">${esc(p.industry)}｜量比 ${fmt(p.volRatio)}</div>
         <div class="s num" style="text-align:right">${liveOn&&stockById[p.id]?.live?`現在 <span class="${cls(stockById[p.id].chgPct)}">${sign(stockById[p.id].chgPct)}${fmt(stockById[p.id].chgPct)}%</span>`:`明日漲停 ${fmt(p.limitUp)}`}</div></div>`).join("") + hist;
@@ -539,7 +544,10 @@ function renderHome(){
   else {
     $("#pickList").innerHTML = tiers.filter(([t])=>t===pickKey).map(([t,label])=>{ const ps=picks.filter(p=>p.strategy===t); if(!ps.length) return '<div class="empty">這個策略今天沒有訊號</div>';
       return ps.map(p=>`<div class="pick" data-id="${esc(p.id)}">
-        <div><span class="n">${esc(p.name)}</span> <span class="meta">${esc(p.id)}</span> <span class="badge grp">${esc(p.group)}</span>${(p.flag||"").split("；").filter(Boolean).map(f=>`<span class="badge" style="background:#3a1a1a;color:#ff9a9a">${esc(f)}</span>`).join("")}</div>
+        <div><span class="n">${esc(p.name)}</span> <span class="meta">${esc(p.id)}</span> <span class="badge grp">${esc(p.group)}</span>${(()=>{ const alt=(byId[p.id]?.sigs||[]).filter(x=>x!=="突破"), paused=/大盤空頭暫停/.test(p.flag||"");
+          const other=(p.flag||"").split("；").filter(f=>f&&f!=="大盤空頭暫停").map(f=>`<span class="badge" style="background:#3a1a1a;color:#ff9a9a">${esc(f)}</span>`).join("");
+          return other+(paused&&!alt.length?'<span class="badge" style="background:#3a1a1a;color:#ff9a9a">⛔ 不買（突破暫停）</span>'
+            :`<span class="badge" style="background:#14301f;color:#7ee2a8">🟢 可買（開盤${paused?"，"+esc(alt.join("＋"))+"訊號":""}）</span>`); })()}</div>
         <div class="num ${cls(p.chgPct)}" style="text-align:right;font-weight:600">${fmt(p.close)}<span style="font-size:12px"> ${sign(p.chgPct)}${fmt(p.chgPct)}%</span></div>
         <div class="s">${esc(p.industry)}｜${p.strategy==="跳空策略"?"跳空":p.strategy==="晨星策略"?"高於長黑中點":"突破"} ${fmt(p.sigPct)}%｜量比 ${fmt(p.volRatio)}</div>
         <div class="s num" style="text-align:right">${liveOn&&stockById[p.id]?.live?`現在 <span class="${cls(stockById[p.id].chgPct)}">${sign(stockById[p.id].chgPct)}${fmt(stockById[p.id].chgPct)}%</span>`:`明日漲停 ${fmt(p.limitUp)}`}</div></div>`).join(""); }).join("");
@@ -904,16 +912,16 @@ function renderSummary(){
   // 盤中監控沒在跑（電腦睡著／沒開）：先講清楚，免得以為「收盤前清單」不見了
   { const n0=new Date(Date.now()+8*3600e3), m0=n0.getUTCHours()*60+n0.getUTCMinutes(), wd0=n0.getUTCDay();
     if(wd0>=1 && wd0<=5 && m0>=9*60+5 && m0<16*60+40 && !(LV && LV.date===today))
-      L.push(`<div class="act" style="border-left-color:#f5c66b">⚠️ <b>今天還沒收到盤中資料</b>：家裡電腦可能睡著了，或「盤中監控」沒開，所以即時行情和 13:15「收盤前可以買／該賣」都不會出現。<br><span class="meta">請到電腦按一下鍵盤叫醒它，雙擊「盤中監控.bat」（13:35 前才有用）。今天休市就不用理會。</span></div>`); }
+      L.push(`<div class="act" style="border-left-color:#f5c66b">⚠️ <b>今天還沒收到盤中資料</b>：家裡電腦可能睡著了，或「盤中監控」沒開，所以即時行情和 13:15「🟢 可買／🔴 賣」都不會出現。<br><span class="meta">請到電腦按一下鍵盤叫醒它，雙擊「盤中監控.bat」（13:35 前才有用）。今天休市就不用理會。</span></div>`); }
   // ⏰ 13:15 收盤前：今天要買／要賣（最重要，放最上面）
   const pre = liveToday ? LV.preclose : null;
   if(pre){
     const buys=(pre.buys||[]).filter(b=>!b.flag), skip=(pre.buys||[]).filter(b=>b.flag);
     let h=`<b>⏰ ${esc(pre.t)} 收盤前整理</b>（台股 13:30 收盤，要買要賣在這之前下單）<br>`;
-    h+=`🛒 <b>可以考慮收盤前買</b>：`+(buys.length? buys.map(b=>`${nm2(b)} ${esc(b.id)}（${esc(b.w)}，<span class="${cls(b.pct)}">${sign(b.pct)}${fmt(b.pct)}%</span>${b.notice?"，注意股":""}）`).join("、") : "今天沒有符合規則的股票");
-    if(skip.length) h+=`<br><span class="meta">⛔ 不建議：${skip.map(b=>`${nm2(b)}（${esc(b.flag)}）`).join("、")}</span>`;
-    if(LV.private) h+=`<br>💰 <b>你的持股今天該賣</b>：`+((pre.sells||[]).length? pre.sells.map(x=>`<b class="down">${nm2(x)}</b>（${esc(x.why)}）`).join("、") : "沒有");
-    h+=`<br><span class="meta">規則還在試用，只是提醒，不是叫你買賣；收盤後 16:30 才是正式訊號。</span>`;
+    h+=`🟢 <b>可買（13:30 前）</b>：`+(buys.length? buys.map(b=>`${nm2(b)} ${esc(b.id)}（${esc(b.w)}，<span class="${cls(b.pct)}">${sign(b.pct)}${fmt(b.pct)}%</span>${b.notice?"，注意股":""}）`).join("、") : "今天沒有可買的");
+    if(skip.length) h+=`<br>⛔ <b>不買</b>：${skip.map(b=>`${nm2(b)}（${esc(b.flag)}）`).join("、")}`;
+    if(LV.private) h+=`<br>`+((pre.sells||[]).length? `🔴 <b>賣（13:30 前）</b>：`+pre.sells.map(x=>`<b class="down">${nm2(x)}</b>（${esc(x.why)}）`).join("、") : "🟢 你的持股今天都不用賣");
+    h+=`<br><span class="meta">規則還在試用，真錢請小量；系統不會幫你下單。收盤後 16:30 才是正式訊號。</span>`;
     L.push(`<div class="act">${h}</div>`);
   }
   // 大盤：盤中用即時報價，收盤後用正式資料
@@ -929,8 +937,8 @@ function renderSummary(){
     const nowPct={}; (LV.rows||[]).forEach(r=>nowPct[r.id]=r.pct);
     const okL=LV.open.filter(o=>o.ok && !o.stop), uniq=[...new Map(okL.map(o=>[o.id,o])).values()];
     const up=uniq.filter(o=>(nowPct[o.id]??0)>0).length;
-    row("今天候選",`昨天收盤出訊號、今天開盤可買 ${uniq.length} 檔（現在 ${up} 檔上漲）：`+uniq.slice(0,8).map(o=>`${nm2(o)} <span class="${cls(nowPct[o.id])}">${nowPct[o.id]==null?"":sign(nowPct[o.id])+fmt(nowPct[o.id])+"%"}</span>`).join("、")+(uniq.length>8?"…":"")
-      +(LV.open.some(o=>o.stop)?`<br><span class="meta">突破候選因大盤偏弱暫停</span>`:""));
+    row("今天候選",`🟢 可買（昨天收盤的訊號，規則是開盤買）${uniq.length} 檔（現在 ${up} 檔上漲）：`+uniq.slice(0,8).map(o=>`${nm2(o)} <span class="${cls(nowPct[o.id])}">${nowPct[o.id]==null?"":sign(nowPct[o.id])+fmt(nowPct[o.id])+"%"}</span>`).join("、")+(uniq.length>8?"…":"")
+      +(LV.open.some(o=>o.stop)?`<br>⛔ 不買：${[...new Map(LV.open.filter(o=>o.stop).map(o=>[o.id,o])).values()].map(o=>nm2(o)).join("、")}（突破暫停：大盤在季線下）`:""));
   }
   // 訊號（收盤後的正式訊號）
   const picks=D.picks||[]; const cnt=t=>picks.filter(p=>p.strategy===t).length;
@@ -944,8 +952,8 @@ function renderSummary(){
   // 你的持股（只有電腦本機看得到）
   if(liveToday && LV.private && (LV.health||[]).length){
     const H=LV.health, red=H.filter(x=>x.light.startsWith("🔴")), yel=H.filter(x=>x.light.startsWith("🟡")), grn=H.filter(x=>x.light.startsWith("🟢"));
-    row("我的持股",(red.length?`🔴 <b class="down">${red.map(x=>nm2(x)+"（"+esc(x.why.split("；")[0])+"）").join("、")}</b><br>`:"")
-      +(yel.length?`🟡 ${yel.map(x=>nm2(x)+"（"+esc(x.why.split("；")[0])+"）").join("、")}<br>`:"")
+    row("我的持股",(red.length?`🔴 <b class="down">賣：${red.map(x=>nm2(x)+"（"+esc(x.why.split("；")[0])+"）").join("、")}</b><br>`:"")
+      +(yel.length?`🟡 注意（不用賣）：${yel.map(x=>nm2(x)+"（"+esc(x.why.split("；")[0])+"）").join("、")}<br>`:"")
       +(grn.length?`🟢 ${grn.map(x=>nm2(x)).join("、")} 續抱`:""));
   }
   if(liveToday){ const al=LV.alerts||[]; if(al.length) row("提醒",`今天 ${al.length} 則，最新 ${esc(al[0].t)}：${esc(al[0].msg.split("\n")[0].slice(0,40))}`); }
@@ -961,8 +969,8 @@ function renderSummary(){
   let todo;
   if(wd===0||wd===6) todo="週末休市：可以看「研究」頁的每週結論，或複習名詞說明。";
   else if(m<9*60) todo="開盤前：看上方「今日策略訊號」，09:01 會推播開盤檢查（開盤就漲停的會放棄）。";
-  else if(m<13*60+15) todo="盤中：不用一直盯，電腦每分鐘監控，有異常會推 Telegram。13:15 會在這裡最上面列出「收盤前可以買／該賣」，Telegram 也會通知。";
-  else if(m<13*60+30) todo="收盤前：13:15 已推播「收盤前買進候選」與該賣的持股，要買要賣請在 13:30 前下單。";
+  else if(m<13*60+15) todo="盤中：不用一直盯，電腦每分鐘監控，有異常會推 Telegram。13:15 會在這裡最上面列出「🟢 可買／🔴 賣」，Telegram 也會通知。";
+  else if(m<13*60+30) todo="收盤前：13:15 已推播「🟢 可買／🔴 賣」，要買要賣請在 13:30 前下單。";
   else if(m<16*60+40) todo="收盤後：16:30 會自動更新今天的訊號與帳本，約 16:35 起重新整理就看得到。";
   else todo="盤後：今天的訊號已更新，明天開盤前決定要不要照「今日策略訊號」買；賣出以持有 20 個交易日為準。";
   L.push(`<div class="todo">👉 ${todo}</div>`);
